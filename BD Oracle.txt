@@ -1,0 +1,311 @@
+//OBJETOS//
+
+CREATE OR REPLACE TYPE DIRECCION AS OBJECT(
+Calle VARCHAR2(25),
+Ciudad VARCHAR2(20),
+Cp NUMBER(5)
+);
+
+CREATE OR REPLACE TYPE USUARIO AS OBJECT(
+Ncarnet NUMBER,
+Dni VARCHAR2(9),
+Nombre VARCHAR2(35),
+Direc DIRECCION,
+Penalizacion NUMBER(1,0)
+);
+
+CREATE OR REPLACE TYPE LIBRO AS OBJECT(
+Id_Libro NUMBER,
+Autor VARCHAR2(25),
+Titulo VARCHAR2(30),
+Editorial VARCHAR2(35),
+CLASE VARCHAR(20),
+DISPONIBILIDAD NUMBER(1,0)
+);
+
+
+
+//TABLAS CREADAS//
+
+CREATE TABLE TABLA_USUARIOS OF USUARIO(
+Ncarnet PRIMARY KEY
+);
+
+CREATE TABLE TABLA_LIBRO OF LIBRO(
+Id_Libro PRIMARY KEY
+);
+
+CREATE TABLE CLASE (
+Id_Clase NUMBER,
+Tipo VARCHAR2(25),
+Tiempo NUMBER
+);
+
+CREATE TABLE TABLA_PRESTAMOS(
+Id_Prestamo NUMBER PRIMARY KEY,
+Fecha_Inicio DATE NOT NULL,
+Fecha_Limite DATE NOT NULL,
+Fecha_Devolucion DATE,
+libro REF LIBRO SCOPE IS TABLA_LIBRO,
+usuario REF USUARIO SCOPE IS TABLA_USUARIOS
+);
+
+CREATE TABLE TABLA_HISTORICOS(
+Id_Prestamo NUMBER,
+Fecha_Inicio DATE,
+Fecha_Limite DATE,
+Fecha_Devolucion DATE,
+Id_Libro REF LIBRO SCOPE IS TABLA_LIBRO,
+Id_Usuario REF USUARIO SCOPE IS TABLA_USUARIOS
+);
+
+//Secuencias//
+
+create sequence sec_codigolibros
+  start with 1
+  increment by 1
+  maxvalue 99999
+  minvalue 1;
+
+
+create sequence sec_num_carnet
+  start with 1
+  increment by 1
+  maxvalue 99999
+  minvalue 1;
+
+
+create sequence sec_idPrestamo
+  start with 1
+  increment by 1
+  maxvalue 99999
+  minvalue 1;
+
+
+//PROCEDIMIENTOS//
+
+---------------------Usuarios---------------------------------------------------------
+
+create or replace PROCEDURE Insertar_Usuario ( 
+dni IN TABLA_USUARIOS.DNI%TYPE,
+nombre IN TABLA_USUARIOS.NOMBRE%TYPE,
+calle IN TABLA_USUARIOS.DIREC.CALLE%TYPE,
+ciudad IN TABLA_USUARIOS.DIREC.CIUDAD%TYPE,
+cp IN TABLA_USUARIOS.DIREC.CP%TYPE,
+penalizacion IN TABLA_USUARIOS.PENALIZACION%TYPE
+)
+IS 
+BEGIN
+INSERT INTO TABLA_USUARIOS VALUES
+(SEC_NUM_CARNET.NEXTVAL,nombre,DIRECCION(calle,ciudad,cp),penalizacion);
+END;
+
+
+create or replace PROCEDURE Editar_Usuario(
+nombre IN TABLA_USUARIOS.NOMBRE%TYPE,
+dni IN TABLA_USUARIOS.DNI%TYPE,
+calle IN TABLA_USUARIOS.DIREC.CALLE%TYPE,
+ciudad IN TABLA_USUARIOS.DIREC.CIUDAD%TYPE,
+cp IN TABLA_USUARIOS.DIREC.CP%TYPE,
+penalizacion IN TABLA_USUARIOS.PENALIZACION%TYPE)
+IS
+BEGIN 
+UPDATE  TABLA_USUARIOS U SET U.NOMBRE=nombre,U.DNI=dni,U.DIREC.CALLE=calle,U.DIREC.CIUDAD=ciudad,U.DIREC.CP=cp,U.PENALIZACION=penalizacion;
+END;
+
+
+create or replace PROCEDURE Eliminar_Usuarios (
+id IN TABLA_USUARIOS.NCARNET%TYPE)
+IS
+BEGIN
+DELETE FROM TABLA_USUARIOS WHERE TABLA_USUARIOS.NCARNET=id;
+END;
+
+
+-----------------------------------------LIBROS-------------------------------------------------------
+
+CREATE OR REPLACE PROCEDURE "Insertar_Libros"(
+autor IN TABLA_LIBRO.AUTOR%TYPE,
+titulo IN TABLA_LIBRO.TITULO%TYPE, 
+editorial IN TABLA_LIBRO.EDITORIAL%TYPE, 
+clase IN TABLA_LIBRO.CLASE%TYPE,
+disponibilidad IN TABLA_LIBRO.DISPONIBILIDAD%TYPE)IS
+BEGIN 
+INSERT INTO TABLA_LIBRO l VALUES(sec_codigolibros.NEXTVAL,autor,titulo,editorial,clase,disponibilidad);
+END;
+
+create or replace PROCEDURE      "ELIMINAR_LIBRO" (
+      id IN TABLA_LIBRO.ID_LIBRO%TYPE
+) IS
+BEGIN
+    DELETE FROM TABLA_LIBRO L  WHERE L.ID_LIBRO=id;
+END;
+
+-----------------------------------PRESTAMOS--------------------------------------------------------
+create or replace PROCEDURE "Crear_Prestamo"(
+
+  id_libro IN TABLA_LIBRO.ID_LIBRO%TYPE,
+  id_usuario IN TABLA_USUARIOS.NCARNET%TYPE, 
+  clase VARCHAR2)
+  
+  IS
+  
+   Disp NUMBER;
+   dias_clase NUMBER;
+	dia_hoy DATE;
+  
+  BEGIN 
+  select   CURRENT_TIMESTAMP into dia_hoy from dual;
+  SELECT  l.DISPONIBILIDAD INTO Disp FROM TABLA_LIBRO l WHERE l.ID_LIBRO=id_libro;
+  SELECT Tiempo INTO dias_clase FROM CLASE WHERE Tipo=clase;  
+  DBMS_OUTPUT.PUT_LINE(dias_clase+'entro');  
+  IF Disp=0 THEN
+  UPDATE TABLA_LIBRO SET DISPONIBILIDAD=1 WHERE ID_LIBRO=id_libro;
+  INSERT INTO TABLA_PRESTAMOS(ID_PRESTAMO,FECHA_INICIO,FECHA_LIMITE,FECHA_DEVOLUCION,LIBRO,USUARIO)
+  SELECT sec_idPrestamo.NEXTVAL,dia_hoy,dia_hoy+dias_clase,NULL,REF(L),REF(U) FROM  TABLA_LIBRO L, TABLA_USUARIOS U WHERE L.ID_LIBRO=id_libro AND  U.NCARNET=id_usuario;
+
+
+END IF;
+END;
+
+
+
+create or replace PROCEDURE Devolver_Libros(
+
+  id_libro IN TABLA_LIBRO.ID_LIBRO%TYPE, 
+  id_prest number)
+
+  IS
+  
+  Disp NUMBER;
+  fecha_entrega DATE;
+  id_usuario NUMBER;
+  fecha_limite DATE;
+  BEGIN 
+
+  SELECT  DISPONIBILIDAD INTO Disp FROM TABLA_LIBRO  WHERE ID_LIBRO=id_libro;
+  IF DISP=1 THEN
+  UPDATE TABLA_LIBRO SET DISPONIBILIDAD=0 WHERE ID_LIBRO=id_libro;
+   select   CURRENT_TIMESTAMP into fecha_entrega from dual;
+   UPDATE TABLA_PRESTAMOS p SET p.FECHA_LIMITE=fecha_entrega WHERE p.ID_PRESTAMO=id_prest;
+   
+ INSERT INTO TABLA_HISTORICOS
+ (SELECT * FROM TABLA_PRESTAMOS WHERE ID_PRESTAMO=id_prest);
+ 
+ 
+ SELECT FECHA_LIMITE INTO fecha_limite FROM TABLA_PRESTAMOS WHERE ID_PRESTAMO=id_prest;
+ 
+  IF fecha_entrega > fecha_limite THEN
+  SELECT DEREF(USUARIO).NCARNET INTO id_usuario FROM TABLA_PRESTAMOS  WHERE ID_PRESTAMO=id_prest;
+  UPDATE TABLA_USUARIOS SET PENALIZACION=1 WHERE NCARNET=id_usuario;
+  END IF;
+  
+DELETE TABLA_PRESTAMOS WHERE ID_PRESTAMO= id_prest;
+END IF;
+END;     
+
+
+//PACKAGES//
+
+create or replace PACKAGE "CONSULTA USUARIOS"
+AS
+
+TYPE cursor_dinamico IS REF CURSOR;
+
+PROCEDURE obtener_usuarios (listar OUT cursor_dinamico);
+
+END;
+
+CREATE OR REPLACE PACKAGE BODY "CONSULTA USUARIOS"
+IS
+PROCEDURE obtener_usuarios (listar OUT cursor_dinamico) IS 
+BEGIN
+OPEN listar FOR
+SELECT * FROM TABLA_USUARIOS;
+
+END;
+END;
+
+
+create or replace PACKAGE "CONSULTA LIBROS"
+AS
+
+TYPE cursor_dinamico IS REF CURSOR;
+
+PROCEDURE obtener_libros (listar OUT cursor_dinamico);
+
+END;
+
+CREATE OR REPLACE PACKAGE BODY "CONSULTA LIBROS"
+IS
+PROCEDURE obtener_libros (listar OUT cursor_dinamico) IS 
+BEGIN
+OPEN listar FOR
+SELECT * FROM TABLA_LIBRO;
+
+END;
+END;
+
+create or replace PACKAGE "CONSULTA CLASES"
+AS
+
+TYPE cursor_dinamico IS REF CURSOR;
+
+PROCEDURE obtener_clases (listar OUT cursor_dinamico);
+
+END;
+
+CREATE OR REPLACE PACKAGE BODY "CONSULTA CLASES"
+IS
+PROCEDURE obtener_clases (listar OUT cursor_dinamico) IS 
+BEGIN
+OPEN listar FOR
+SELECT * FROM CLASE;
+
+END;
+END;
+
+
+create or replace PACKAGE "CONSULTA PRESTAMOS"
+AS
+
+TYPE cursor_dinamico IS REF CURSOR;
+
+PROCEDURE obtener_prestamos (listar OUT cursor_dinamico);
+
+END;
+
+CREATE OR REPLACE PACKAGE BODY "CONSULTA PRESTAMOS"
+IS
+PROCEDURE obtener_prestamos (listar OUT cursor_dinamico) IS 
+BEGIN
+OPEN listar FOR
+SELECT * FROM TABLA_PRESTAMOS;
+
+END;
+END;
+
+
+
+create or replace PACKAGE "CONSULTA HISTORICO"
+AS
+
+TYPE cursor_dinamico IS REF CURSOR;
+
+PROCEDURE obtener_historico (listar OUT cursor_dinamico);
+
+END;
+
+CREATE OR REPLACE PACKAGE BODY "CONSULTA HISTORICO"
+IS
+PROCEDURE obtener_historico (listar OUT cursor_dinamico) IS 
+BEGIN
+OPEN listar FOR
+SELECT * FROM TABLA_HISTORICOS;
+
+END;
+END;
+
+
+
+
